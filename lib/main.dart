@@ -1,5 +1,9 @@
 // lib/main.dart
+// lib/main.dart
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';   // ✅ REQUIRED
+
 import 'screens/login_sc.dart';
 import 'screens/std.dart';
 import 'screens/admin.dart';
@@ -13,9 +17,14 @@ import 'screens/pm.dart';
 import 'screens/wingsec.dart';
 import 'screens/parent.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform, // ✅ REQUIRED
+  );
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
