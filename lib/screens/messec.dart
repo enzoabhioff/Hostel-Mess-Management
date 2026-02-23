@@ -1,191 +1,126 @@
 import 'package:flutter/material.dart';
-import 'logout_sc.dart'; // Ensure this matches your filename
+import 'logout_sc.dart';
+import 'otp_store.dart';
+import 'others_tab_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+const primaryGreen = Color(0xFF2D6A4F);
+const accentGreen = Color(0xFF40916C);
+const lightGreen = Color(0xFFD8F3DC);
 
 class MessSecScreen extends StatefulWidget {
   const MessSecScreen({super.key});
+
   @override
   State<MessSecScreen> createState() => _MessSecScreenState();
 }
 
 class _MessSecScreenState extends State<MessSecScreen> {
   final ordered = <Map<String, String>>[];
+  final finalList = <Map<String, String>>[];
+
   final itemC = TextEditingController();
   final qtyC = TextEditingController();
+  final brandC = TextEditingController();
+  final _studentNumberController = TextEditingController();
 
-  final received = [
-    {'item': 'Rice', 'qty': '200 kg'},
-    {'item': 'Dal', 'qty': '80 kg'}
-  ];
+  Future<void> _saveFinalListToFirestore() async {
+    if (finalList.isEmpty) return;
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      await FirebaseFirestore.instance.collection('purchase_orders').add({
+        'messSecId': uid,
+        'items': finalList,
+        'status': 'SENT_TO_PM',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      setState(() => finalList.clear());
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Final list sent to Purchase Manager')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
 
-  int veg = 100, nonVeg = 50;
-  double vegRate = 90, nonVegRate = 110;
-  int days = 30;
+  Widget _buildReceivedListStream() {
+    return StreamBuilder<QuerySnapshot>(
+      // ✅ NEW: Listens for deliveries from the Purchase Manager
+      stream: FirebaseFirestore.instance.collection('daily_deliveries').orderBy('submittedAt', descending: true).limit(1).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const Padding(padding: EdgeInsets.all(16), child: Text('No items received yet', style: TextStyle(color: Colors.grey)));
+        }
 
-  final menu = [
-    {'day': 'Monday', 'meals': 'Idli | Rice Dal | Chapati Paneer'}
-  ];
-  final dayC = TextEditingController();
-  final mealsC = TextEditingController();
+        final doc = snapshot.data!.docs.first;
+        final data = doc.data() as Map<String, dynamic>;
+        final items = List<Map<String, dynamic>>.from(data['receivedItems'] ?? []);
 
-  final duties = <String>[];
-  final dutyNameC = TextEditingController();
-  final dutyDescC = TextEditingController();
-
-  final otpC = TextEditingController();
+        return Column(
+          children: [
+            DataTable(
+              headingRowColor: MaterialStateProperty.all(lightGreen),
+              columns: const [DataColumn(label: Text('Item')), DataColumn(label: Text('Qty')), DataColumn(label: Text('Brand'))],
+              rows: items.map((e) => DataRow(cells: [
+                DataCell(Text(e['item'] ?? '')),
+                DataCell(Text(e['qty'].toString())),
+                DataCell(Text(e['brand'] ?? '')),
+              ])).toList(),
+            ),
+            const SizedBox(height: 16),
+            _greenButton('Verify & Forward', () async {
+              await doc.reference.update({'status': 'VERIFIED'});
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Delivery verified and forwarded!')));
+            }),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    double total = (veg * vegRate + nonVeg * nonVegRate) * days;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5FFFB),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        title: const Text(
-          'Mess Secretary',
-          style: TextStyle(color: Color(0xFF2d6a4f), fontWeight: FontWeight.bold),
-        ),
-        // --- Added Logout Button ---
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Color(0xFF2d6a4f)),
-            onPressed: () => LogoutHandler.logout(context),
-          ),
-        ],
-      ),
+      appBar: AppBar(backgroundColor: Colors.white, elevation: 0, centerTitle: true, title: const Text('Mess Secretary', style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)), actions: [IconButton(icon: const Icon(Icons.logout, color: primaryGreen), onPressed: () => LogoutHandler.logout(context))]),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(children: [
-          _card('Ordered List', Icons.shopping_cart, [
-            _tf(itemC, 'Item'),
-            _tf(qtyC, 'Quantity'),
-            ElevatedButton(
-                onPressed: () {
-                  if (itemC.text.isNotEmpty) {
-                    setState(() => ordered.add({'item': itemC.text, 'qty': qtyC.text}));
-                    itemC.clear();
-                    qtyC.clear();
-                  }
-                },
-                child: const Text('Add')),
-            ...ordered.map((e) => ListTile(title: Text(e['item']!), subtitle: Text(e['qty']!))),
-          ]),
-          _card(
-              'Received List',
-              Icons.inventory,
-              received
-                  .map((e) => ListTile(title: Text(e['item']!), subtitle: Text(e['qty']!)))
-                  .toList()),
-          _card('Mess Bill Calculation', Icons.calculate, [
-            _slider('Veg: $veg', veg, (v) => setState(() => veg = v.toInt())),
-            _slider('Non-Veg: $nonVeg', nonVeg, (v) => setState(() => nonVeg = v.toInt())),
-            Text('Total: ₹$total',
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF00695C))),
-          ]),
-          _card('Verification', Icons.verified, [
-            ElevatedButton(
-                onPressed: () => _snack('Bill forwarded to Admin'),
-                child: const Text('Verify & Forward'))
-          ]),
-          _card('Duty Allocation', Icons.assignment, [
-            _tf(dutyNameC, 'Student Name'),
-            _tf(dutyDescC, 'Duty Description'),
-            ElevatedButton(
-                onPressed: () {
-                  if (dutyNameC.text.isNotEmpty) {
-                    setState(() => duties.add('${dutyNameC.text} - ${dutyDescC.text}'));
-                    dutyNameC.clear();
-                    dutyDescC.clear();
-                  }
-                },
-                child: const Text('Allocate')),
-            ...duties.map((d) => ListTile(title: Text(d))),
-          ]),
-          _card('Menu Management', Icons.restaurant_menu, [
-            _tf(dayC, 'Day'),
-            _tf(mealsC, 'Meals (B|L|D)'),
-            ElevatedButton(
-                onPressed: () {
-                  if (dayC.text.isNotEmpty) {
-                    setState(() => menu.add({'day': dayC.text, 'meals': mealsC.text}));
-                    dayC.clear();
-                    mealsC.clear();
-                  }
-                },
-                child: const Text('Add Day')),
-            ...menu.map((e) => ListTile(title: Text(e['day']!), subtitle: Text(e['meals']!))),
-          ]),
-          _card('Veg/Non-Veg Counts', Icons.people, [
-            _slider('Veg: $veg', veg, (v) => setState(() => veg = v.toInt())),
-            _slider('Non-Veg: $nonVeg', nonVeg, (v) => setState(() => nonVeg = v.toInt())),
-          ]),
-          _card('OTP Verification', Icons.security, [
-            _tf(dutyNameC, 'Student Name'),
-            ElevatedButton(onPressed: () => _snack('OTP Sent'), child: const Text('Send OTP')),
-            _tf(otpC, 'Enter OTP'),
-            ElevatedButton(onPressed: () => _snack('OTP Verified'), child: const Text('Verify')),
-          ]),
-        ]),
+        child: Column(
+          children: [
+            _card('Ordered List', Icons.shopping_cart, [
+              _tf(itemC, 'Item'), _tf(qtyC, 'Quantity'), _tf(brandC, 'Brand'),
+              _greenButton('Add to Current List', () {
+                if (itemC.text.isNotEmpty) {
+                  setState(() => ordered.add({'item': itemC.text, 'qty': qtyC.text, 'brand': brandC.text}));
+                  itemC.clear(); qtyC.clear(); brandC.clear();
+                }
+              }),
+              ...ordered.map((e) => ListTile(title: Text(e['item']!), subtitle: Text('${e['qty']} • ${e['brand']}'))),
+            ]),
+            _card('Final List', Icons.playlist_add_check, [
+              _greenButton('Move All to Final', () { setState(() { finalList.addAll(ordered); ordered.clear(); }); }),
+              const SizedBox(height: 12),
+              _greenButton('Send to Purchase Manager', _saveFinalListToFirestore),
+              ...finalList.map((e) => ListTile(title: Text(e['item']!), subtitle: Text('${e['qty']} • ${e['brand']}'))),
+            ]),
+            _card('Received List', Icons.inventory, [_buildReceivedListStream()]),
+            _card('Student OTP Generation', Icons.lock, [_tf(_studentNumberController, 'Student Number'), _greenButton('Generate OTP', () {})]),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OthersTabScreen())), icon: const Icon(Icons.more_horiz), label: const Text('Others'), style: ElevatedButton.styleFrom(backgroundColor: accentGreen, padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)))),
+          ],
+        ),
       ),
     );
   }
 
-  // UI Helper methods stay the same
   Widget _card(String title, IconData icon, List<Widget> children) => Card(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Icon(icon, color: const Color(0xFF40916c)),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1b4332)))
-            ]),
-            const SizedBox(height: 12),
-            ...children,
-          ]),
-        ),
-      );
+    elevation: 4, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), margin: const EdgeInsets.symmetric(vertical: 12),
+    child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: lightGreen, borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: primaryGreen)), const SizedBox(width: 12), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryGreen))]),
+      const SizedBox(height: 16), ...children,
+    ])),
+  );
 
-  Widget _tf(TextEditingController c, String label) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: TextField(
-            controller: c,
-            decoration: InputDecoration(
-                labelText: label, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
-      );
+  Widget _tf(TextEditingController c, String l) => Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: TextField(controller: c, decoration: InputDecoration(labelText: l, filled: true, fillColor: Colors.white, focusedBorder: OutlineInputBorder(borderSide: const BorderSide(color: primaryGreen, width: 2), borderRadius: BorderRadius.circular(12)), enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: accentGreen.withOpacity(0.4)), borderRadius: BorderRadius.circular(12)))));
 
-  Widget _slider(String label, int val, Function(double) onChange) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label),
-          Slider(
-              value: val.toDouble(),
-              min: 0,
-              max: 200,
-              divisions: 200,
-              onChanged: onChange,
-              activeColor: const Color(0xFF52b788))
-        ],
-      );
-
-  void _snack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-
-  @override
-  void dispose() {
-    itemC.dispose();
-    qtyC.dispose();
-    dayC.dispose();
-    mealsC.dispose();
-    dutyNameC.dispose();
-    dutyDescC.dispose();
-    otpC.dispose();
-    super.dispose();
-  }
+  Widget _greenButton(String t, VoidCallback o) => SizedBox(width: double.infinity, child: ElevatedButton(onPressed: o, style: ElevatedButton.styleFrom(backgroundColor: accentGreen, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text(t, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600))));
 }
