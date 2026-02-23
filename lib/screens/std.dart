@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'logout_sc.dart'; // Ensure this matches your filename
 
-class StudentScreen extends StatelessWidget {
+class StudentScreen extends StatefulWidget {
   const StudentScreen({super.key});
 
+  @override
+  State<StudentScreen> createState() => _StudentScreenState();
+}
+
+class _StudentScreenState extends State<StudentScreen> {
   // Sample static data
-  final String studentName = "Rahul Sharma";
+  final String studentName = "Sahala";
   final int totalDaysInMonth = 31;
   final int presentDays = 27;
   final double dailyMessRate = 95.0;
@@ -27,6 +32,52 @@ class StudentScreen extends StatelessWidget {
     "Waste Segregation - Week 2",
   ];
 
+  // ─── Complaint Section Data ─────────────────────────────────────────────────
+  final _complaintTitleController = TextEditingController();
+  final _complaintDescController = TextEditingController();
+  final List<Map<String, String>> _myComplaints = [
+    {'title': 'Food too spicy', 'date': 'Yesterday', 'status': 'Pending'},
+    {'title': 'No salt in dal', 'date': '2 days ago', 'status': 'Resolved'},
+  ];
+
+  @override
+  void dispose() {
+    _complaintTitleController.dispose();
+    _complaintDescController.dispose();
+    super.dispose();
+  }
+
+  void _submitComplaint() {
+    final title = _complaintTitleController.text.trim();
+    final desc = _complaintDescController.text.trim();
+
+    if (title.isEmpty || desc.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill title and description'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    // Add to local list (you can later save to Firestore)
+    setState(() {
+      _myComplaints.insert(0, {
+        'title': title,
+        'date': 'Just now',
+        'status': 'Pending',
+      });
+    });
+
+    _complaintTitleController.clear();
+    _complaintDescController.clear();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Complaint submitted successfully'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     double attendancePercentage = (presentDays / totalDaysInMonth) * 100;
@@ -46,7 +97,6 @@ class StudentScreen extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
-        // --- Added Logout Button ---
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFF2d6a4f)),
@@ -94,7 +144,7 @@ class StudentScreen extends StatelessWidget {
             ),
             const SizedBox(height: 30),
 
-            // 1. Attendance Card
+            // Attendance Card
             _buildInfoCard(
               title: "Your Attendance",
               icon: Icons.how_to_reg,
@@ -122,7 +172,7 @@ class StudentScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // 2 & 3. Mess Bill
+            // Mess Bill
             _buildInfoCard(
               title: "Mess Bill",
               icon: Icons.receipt_long,
@@ -150,7 +200,7 @@ class StudentScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // 4. Weekly Food Menu
+            // Weekly Food Menu
             _buildInfoCard(
               title: "Weekly Food Menu",
               icon: Icons.restaurant_menu,
@@ -175,7 +225,7 @@ class StudentScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // 5. Mess Duty
+            // Mess Duty
             _buildInfoCard(
               title: "Your Mess Duty",
               icon: Icons.assignment_turned_in,
@@ -199,6 +249,79 @@ class StudentScreen extends StatelessWidget {
                 }).toList(),
               ),
             ),
+            const SizedBox(height: 30),
+
+            // ─── NEW: Complaint Section ────────────────────────────────────────────────
+            _buildInfoCard(
+              title: "Raise a Complaint",
+              icon: Icons.report_problem,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Form to add new complaint
+                  TextFormField(
+                    controller: _complaintTitleController,
+                    decoration: InputDecoration(
+                      labelText: 'Complaint Title',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _complaintDescController,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      labelText: 'Description',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.send),
+                      label: const Text('Submit Complaint'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _submitComplaint,
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // List of previous complaints
+                  const Text(
+                    'Your Previous Complaints',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_myComplaints.isEmpty)
+                    const Text('No complaints submitted yet', style: TextStyle(color: Colors.grey))
+                  else
+                    ..._myComplaints.map((c) => Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: const Icon(Icons.report, color: Colors.orange),
+                            title: Text(c['title']!),
+                            subtitle: Text('Submitted: ${c['date']} • Status: ${c['status']}'),
+                            trailing: Chip(
+                              label: Text(c['status']!),
+                              backgroundColor: c['status'] == 'Pending' ? Colors.orange.shade100 : Colors.green.shade100,
+                            ),
+                          ),
+                        )),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 40),
           ],
         ),
@@ -206,7 +329,7 @@ class StudentScreen extends StatelessWidget {
     );
   }
 
-  // Helper UI methods (same as original)
+  // ─── Helper Methods (unchanged) ─────────────────────────────────────────────
   Widget _buildInfoCard({required String title, required IconData icon, required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(20),
