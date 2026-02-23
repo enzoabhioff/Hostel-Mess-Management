@@ -1,6 +1,9 @@
-// lib/screens/wingsec.dart
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'login_sc.dart'; // Your login screen
+import 'logout_sc.dart'; // The logout handler you wrote
 
 class WingSecScreen extends StatefulWidget {
   const WingSecScreen({super.key});
@@ -12,281 +15,277 @@ class WingSecScreen extends StatefulWidget {
 class _WingSecScreenState extends State<WingSecScreen> {
   DateTime _selectedDate = DateTime.now();
   DateTime _focusedDate = DateTime.now();
+  bool _isSaving = false;
 
-  late List<Map<String, dynamic>> rooms;
+  List<Map<String, dynamic>> rooms = [];
+
+  // ---------- DATE LOGIC ----------
+  bool get isToday {
+    final now = DateTime.now();
+    return _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+  }
+
+  bool get isPast {
+    final today = DateTime.now();
+    return DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day)
+        .isBefore(DateTime(today.year, today.month, today.day));
+  }
+
+  bool get isFuture {
+    final today = DateTime.now();
+    return DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day)
+        .isAfter(DateTime(today.year, today.month, today.day));
+  }
+
+  String get dateKey => _selectedDate.toIso8601String().substring(0, 10);
 
   @override
   void initState() {
     super.initState();
-    _loadRoomsForDate(_selectedDate);
+    _loadData();
   }
 
-  void _loadRoomsForDate(DateTime date) {
-    rooms = List.generate(10, (i) {
-      String roomNum = '10${i + 1}';
-      return {
-        'number': roomNum,
-        'expanded': false,
-        'students': List.generate(4, (j) => {
-          'name': 'Student ${roomNum}-${j + 1}',
-          'present': true,
-          'messCut': false,
-          'isVeg': true, // true = Veg, false = Non-Veg
-        }),
-      };
+  // ---------- LOAD DATA ----------
+  Future<void> _loadData() async {
+    final roomSnap = await FirebaseFirestore.instance.collection('rooms').get();
+    final studentSnap =
+        await FirebaseFirestore.instance.collection('students').get();
+    final attendanceSnap = await FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(dateKey)
+        .get();
+
+    final savedRooms = attendanceSnap.exists ? attendanceSnap['rooms'] ?? [] : [];
+
+    List<Map<String, dynamic>> tempRooms = [];
+
+    for (var room in roomSnap.docs) {
+      final roomNo = room['roomNumber'].toString();
+
+      final students = studentSnap.docs
+          .where((s) => s['room'] == roomNo)
+          .map((s) {
+        final savedRoom = savedRooms.firstWhere(
+          (r) => r['number'] == roomNo,
+          orElse: () => null,
+        );
+
+        final savedStudent = savedRoom != null
+            ? (savedRoom['students'] as List).firstWhere(
+                (st) => st['studentId'] == s.id,
+                orElse: () => null,
+              )
+            : null;
+
+        return {
+          'studentId': s.id,
+          'name': s['name'],
+          'present': savedStudent != null
+              ? savedStudent['present']
+              : (!isFuture),
+          'messCut': savedStudent != null ? savedStudent['messCut'] : false,
+        };
+      }).toList();
+
+      if (students.isNotEmpty) {
+        tempRooms.add({'number': roomNo, 'students': students});
+      }
+    }
+
+    setState(() => rooms = tempRooms);
+  }
+
+  // ---------- SAVE ----------
+  Future<void> _saveAttendance() async {
+    if (!isToday) return;
+
+    setState(() => _isSaving = true);
+
+    await FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(dateKey)
+        .set({
+      'date': dateKey,
+      'locked': true,
+      'rooms': rooms,
     });
+
+    setState(() => _isSaving = false);
   }
 
-  void _onDaySelected(DateTime selected, DateTime focused) {
-    setState(() {
-      _selectedDate = selected;
-      _focusedDate = focused;
-      _loadRoomsForDate(selected);
-    });
-  }
-
+  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    int totalPresent = 0;
-    int vegCount = 0;
-    int nonVegCount = 0;
-    int messCutCount = 0;
+    int totalIn = 0, totalCut = 0;
 
-    for (var room in rooms) {
-      final students = room['students'] as List<Map<String, dynamic>>;
-      for (var s in students) {
-        if (s['present'] as bool) {
-          totalPresent++;
-          if (s['isVeg'] as bool) {
-            vegCount++;
-          } else {
-            nonVegCount++;
-          }
-        }
-        if (s['messCut'] as bool) messCutCount++;
+    for (var r in rooms) {
+      for (var s in r['students']) {
+        if (s['present'] == true) totalIn++;
+        if (s['messCut'] == true) totalCut++;
       }
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wing Sec Dashboard'),
-        backgroundColor: Colors.teal[700],
-        foregroundColor: Colors.white,
+        title: const Text('Wing Secretary'),
+        backgroundColor: Colors.teal[800],
         actions: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
-            child: Center(child: Text('Welcome, wing sec', style: TextStyle(fontSize: 16))),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => LogoutHandler.logout(context),
+            tooltip: 'Logout',
           ),
-          TextButton(
-            onPressed: () => Navigator.popUntil(context, (route) => route.isFirst),
-            child: const Text('Logout', style: TextStyle(color: Colors.white)),
-          ),
-          const SizedBox(width: 8),
         ],
       ),
-      body: CustomScrollView(
-        slivers: [
-          // Calendar
-          SliverToBoxAdapter(
-            child: Card(
-              margin: const EdgeInsets.all(12),
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: TableCalendar(
-                firstDay: DateTime.utc(2025, 1, 1),
-                lastDay: DateTime.utc(2030, 12, 31),
-                focusedDay: _focusedDate,
-                selectedDayPredicate: (day) => isSameDay(_selectedDate, day),
-                onDaySelected: _onDaySelected,
-                headerStyle: const HeaderStyle(formatButtonVisible: false, titleCentered: true),
-                calendarStyle: CalendarStyle(
-                  selectedDecoration: BoxDecoration(color: Colors.teal[400], shape: BoxShape.circle),
-                  todayDecoration: BoxDecoration(color: Colors.teal[200], shape: BoxShape.circle),
-                ),
-              ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: (!isToday || _isSaving) ? null : _saveAttendance,
+        backgroundColor: Colors.teal[800],
+        child: _isSaving
+            ? const CircularProgressIndicator(color: Colors.white)
+            : const Icon(Icons.cloud_upload),
+      ),
+      body: Column(
+        children: [
+          // ---------- CALENDAR ----------
+          TableCalendar(
+            firstDay: DateTime.utc(2024, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDate,
+            calendarFormat: CalendarFormat.week,
+            selectedDayPredicate: (d) => isSameDay(d, _selectedDate),
+            onDaySelected: (d, f) {
+              setState(() {
+                _selectedDate = d;
+                _focusedDate = f;
+              });
+              _loadData();
+            },
+          ),
+
+          // ---------- SUMMARY ----------
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _summary('IN', totalIn, Colors.green),
+                _summary('CUT', totalCut, Colors.orange),
+              ],
             ),
           ),
 
-          // Date and Summary
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Column(
-                children: [
-                  Text(
-                    'Date: ${_selectedDate.toString().substring(0, 10)}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2d6a4f)),
-                  ),
-                  const SizedBox(height: 16),
-                  GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 3,
-                    childAspectRatio: 1.2,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    children: [
-                      _buildSummaryCard('Total Present', totalPresent, Colors.teal),
-                      _buildSummaryCard('Veg Count', vegCount, Colors.green),
-                      _buildSummaryCard('Non-Veg Count', nonVegCount, Colors.red),
-                      _buildSummaryCard('Mess Cut', messCutCount, Colors.orange),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Daily data saved!'), backgroundColor: Colors.green),
-                        );
-                      },
-                      icon: const Icon(Icons.save),
-                      label: const Text('Save Daily Data'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00695C),
-                        padding: const EdgeInsets.all(16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
+          // ---------- ROOMS ----------
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: rooms.length,
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
               ),
+              itemBuilder: (context, i) => _roomTile(rooms[i]),
             ),
           ),
-
-          // Room Grid
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                childAspectRatio: 1.5,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final room = rooms[index];
-                  final students = room['students'] as List<Map<String, dynamic>>;
-                  int presentCount = students.where((s) => s['present'] as bool).length;
-                  return _buildExpandableRoomCard(room, presentCount);
-                },
-                childCount: rooms.length,
-              ),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 20)),
         ],
       ),
     );
   }
 
-  Widget _buildSummaryCard(String title, int count, Color color) {
-    return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+  Widget _summary(String label, int val, Color col) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        Text('$val',
+            style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.bold, color: col)),
+      ],
+    );
+  }
+
+  Widget _roomTile(Map<String, dynamic> room) {
+    final students = room['students'] as List;
+    final present = students.where((s) => s['present'] == true).length;
+
+    return InkWell(
+      onTap: (!isToday) ? null : () => _editRoom(room),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.teal.shade100),
+          borderRadius: BorderRadius.circular(8),
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title, style: TextStyle(fontSize: 12, color: Colors.grey[700]), textAlign: TextAlign.center),
-            const SizedBox(height: 6),
-            Text('$count', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: color)),
+            Text(room['number'],
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('$present / ${students.length}',
+                style: const TextStyle(fontSize: 10)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildExpandableRoomCard(Map<String, dynamic> room, int presentCount) {
-    final students = room['students'] as List<Map<String, dynamic>>;
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => setState(() => room['expanded'] = !room['expanded']),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Room ${room['number']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.teal)),
-                  Icon(room['expanded'] ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.teal, size: 18),
-                ],
-              ),
-              Text('$presentCount / 4 Present', style: TextStyle(fontSize: 11, color: Colors.grey[700])),
-              if (room['expanded'])
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.only(top: 8),
-                    itemCount: students.length,
-                    itemBuilder: (context, i) {
-                      final s = students[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(child: Text(s['name'] as String, style: const TextStyle(fontSize: 12))),
-                                const Text('Present', style: TextStyle(fontSize: 11)),
-                                Switch(
-                                  value: s['present'] as bool,
-                                  activeColor: Colors.green,
-                                  onChanged: (v) => setState(() => s['present'] = v),
-                                ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                const Text('   Mess Cut', style: TextStyle(fontSize: 11)),
-                                const Spacer(),
-                                Switch(
-                                  value: s['messCut'] as bool,
-                                  activeColor: Colors.orange,
-                                  onChanged: (s['present'] as bool) ? (v) => setState(() => s['messCut'] = v) : null,
-                                ),
-                              ],
-                            ),
-                            Row(
-                              children: [
-                                const Text('   Veg/Non-Veg', style: TextStyle(fontSize: 11)),
-                                const Spacer(),
-                                Switch(
-                                  value: s['isVeg'] as bool,
-                                  activeColor: Colors.green,
-                                  inactiveThumbColor: Colors.red,
-                                  inactiveTrackColor: Colors.red[100],
-                                  onChanged: (s['present'] as bool && !(s['messCut'] as bool))
-                                      ? (v) => setState(() => s['isVeg'] = v)
-                                      : null,
-                                ),
-                                Text(
-                                  s['isVeg'] as bool ? 'Veg' : 'Non-Veg',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: s['isVeg'] as bool ? Colors.green : Colors.red,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-            ],
-          ),
-        ),
+  // ---------- EDIT ROOM ----------
+  void _editRoom(Map<String, dynamic> room) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setModal) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Room ${room['number']}',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+                const Divider(),
+                ...room['students'].map<Widget>((s) {
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(s['name']),
+                      Row(
+                        children: [
+                          ChoiceChip(
+                            label: Text(s['present'] ? 'IN' : 'ABSENT'),
+                            selected: s['present'],
+                            selectedColor: Colors.green,
+                            backgroundColor: Colors.red,
+                            onSelected: (_) {
+                              setModal(() {
+                                s['present'] = !s['present'];
+                              });
+                              setState(() {});
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('CUT'),
+                            selected: s['messCut'],
+                            selectedColor: Colors.red,
+                            backgroundColor: Colors.green,
+                            onSelected: (_) {
+                              setModal(() {
+                                s['messCut'] = !s['messCut'];
+                              });
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      )
+                    ],
+                  );
+                }).toList(),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
