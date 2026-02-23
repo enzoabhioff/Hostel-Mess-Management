@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../main.dart'; // Fixed path
+import 'package:firebase_auth/firebase_auth.dart';
 
-
+import 'login_sc.dart'; // Login screen
 
 class LogoutHandler {
   static void logout(BuildContext context) {
@@ -16,15 +16,21 @@ class LogoutHandler {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              // This clears the stack and goes back to the Role Selection screen
+            onPressed: () async {
+              // 🔐 Sign out from Firebase
+              await FirebaseAuth.instance.signOut();
+
+              // 🔁 Go back to Login screen & clear stack
               Navigator.pushAndRemoveUntil(
                 context,
-                MaterialPageRoute(builder: (context) => const HostelDashboard()),
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
                 (route) => false,
               );
             },
-            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
